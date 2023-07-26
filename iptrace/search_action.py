@@ -1,8 +1,9 @@
 import datetime
 import ipaddress
+import requests
 import iptrace.search_crypt
-import iptrace.search_comm
-from iptrace.models import asIDEA, asGroup, asUser
+import Config
+from iptrace.models import asIDEA, asGroup, asUser, asDomain
 
 
 def getGroupList(group_part: str):
@@ -95,13 +96,37 @@ def hexStrToBinStr(hex_string: str):
     return bin(int(hex_string, 16))[2:]
 
 
-def queryDomain(ip_prefix: str):
+def send2rpki(prefix_ip):
     """
-    通过查询RPKI获取地址前缀所属的AS
-    :param ip_prefix:IPv6地址前缀
-    :return: IPv6地址所来源的AS
+    与RPKI通信,根据地址前缀获取地址所属AS
+    :param prefix_ip: 传入的地址前缀
+    :return: 所属AS的基础信息
     """
-    return iptrace.search_comm.as2rpki(ip_prefix)
+    prefix_data = {'prefix': prefix_ip}
+    rpki_url = 'http://' + Config.RPKI_IP + ':' + str(Config.SERVER_PORT) + '/query_prefix'
+    response = requests.post(rpki_url, data=prefix_data)
+
+    if Config.DEBUG_MODE:
+        print("send2rpki", rpki_url, response.json())
+
+    if response.json()['status'] == 'BS.500':
+        return None
+    return response.json()
+
+
+def queryDomain(prefix_ip):
+    """
+    从数据库中根据地址前缀查询地址所属AS
+    :param prefix_ip: 地址前缀
+    :return: 所属AS的基础信息
+    """
+    if Config.DEBUG_MODE:
+        print("queryDomain", prefix_ip)
+
+    domains = asDomain.objects.filter(domainPrefix=prefix_ip)
+    if domains is not None and len(domains) > 0:
+        return {'domainIP': domains[0].domainIP, 'domainName': domains[0].domainName}
+    return {}
 
 
 def resolveAID(ip_suffix: str):
@@ -110,7 +135,10 @@ def resolveAID(ip_suffix: str):
     :param ip_suffix: 需要解析的目标后缀
     :return: 是否解析成功,具体解析结果
     """
-    resolve_success, resolve_result = True, dict()
+    if Config.DEBUG_MODE:
+        print("resolveAID", ip_suffix)
+
+    resolve_result = {'success': True}
     lastNid, IDEA_list = None, asIDEA.objects.all().order_by("startTime")
     if IDEA_list is not None and len(IDEA_list) > 0:
         for idea_object in IDEA_list:
@@ -135,9 +163,9 @@ def resolveAID(ip_suffix: str):
                 resolve_result['time'] = aidTimeString
                 break
     else:
-        resolve_success = False
+        resolve_result['success'] = False
         resolve_result['message'] = "没有相应的IDEA记录"
-        return resolve_success, resolve_result
+        return resolve_result
 
     if lastNid is not None and lastNid != "":  # 拆分NID
 
@@ -153,38 +181,37 @@ def resolveAID(ip_suffix: str):
         if groupList is not None and len(groupList) > 0:
             userList = getUserList(user_part=userID, group_id=groupList[0].id)
             if userList is not None and len(userList) > 0:
-                resolve_success = True
                 resolve_result['groupName'] = groupList[0].groupName
                 resolve_result['userName'] = userList[0].userName
                 resolve_result['userDid'] = userList[0].userDID
             else:
-                resolve_success = False
+                resolve_result['success'] = False
                 resolve_result['message'] = "不存在对应的用户"
-                return resolve_success, resolve_result
+                return resolve_result
         else:
-            resolve_success = False
+            resolve_result['success'] = False
             resolve_result['message'] = "不存在对应的组织"
-            return resolve_success, resolve_result
-
+            return resolve_result
     else:
-        resolve_success = False
+        resolve_result['success'] = False
         resolve_result['message'] = "没有相应的IDEA记录"
-        return resolve_success, resolve_result
-    return resolve_success, resolve_result
+    return resolve_result
 
 
-def resolveAIDInAS(na_ip: str, ip_suffix: str):
+def send2resolve(target_ip, suffix_ip):
     """
-    将地址后缀发送给对应AS的服务器,然后接收该AS返回的解析结果
-    :param na_ip: 目标AS处理服务器的IP地址
-    :param ip_suffix: 需要解析的IP地址后缀
-    :return: 是否成功解析,解析出的相关参数
+    :param target_ip: 目标AS服务器的IP地址
+    :param suffix_ip: 要求目标AS服务器解析的IP地址后缀
+    :return: 返回解析出的用户信息的json
     """
-    # TODO 配合通信进行实现
-    resolve_success, resolve_result = None, dict()
-    iptrace.search_comm.as2send()  # 发送地址后缀参数
-    iptrace.search_comm.as2receive()  # 接收解析数据
-    return resolve_success, resolve_result
+    suffix_data = {'suffix': suffix_ip}
+    server_url = 'http://' + target_ip + ':' + str(Config.SERVER_PORT) + '/query_suffix'
+    response = requests.post(server_url, data=suffix_data)
+
+    if Config.DEBUG_MODE:
+        print("send2resolve", server_url, response.json())
+
+    return response.json()
 
 
 def search(ipv6_addr: str):
@@ -193,21 +220,20 @@ def search(ipv6_addr: str):
     :param ipv6_addr:输入的IPv6地址
     :return:追溯得到的结果
     """
-    search_success, search_result = True, dict()
-    search_result['ip_addr'] = ipv6_addr
+    search_result = {'success': True, 'ip_addr': ipv6_addr}
     if ipv6_addr is not None and ipv6_addr != "":
         try:  # 检验输入的地址是否符合IP地址格式
             address = ipaddress.ip_address(ipv6_addr)
         except Exception as e:
             print(e)
-            search_success = False
+            search_result['success'] = False
             search_result['message'] = "输入字符串不符合IP地址格式"
-            return search_success, search_result
+            return search_result
 
         if address.version != 6:  # 检验输入的地址是否是IPv6地址格式
-            search_success = False
+            search_result['success'] = False
             search_result['message'] = "输入地址不是IPv6地址"
-            return search_success, search_result
+            return search_result
 
         ipv6_prefix = getPrefix(ipv6_addr)  # 前缀共64位用:号分隔，冒号与冒号间存在0不显示
         ipv6_suffix = getSuffix(ipv6_addr)  # 后缀共64位，每个冒号之前默认4位，不足4位在前面补0
@@ -217,20 +243,23 @@ def search(ipv6_addr: str):
         search_result['aid'] = ipv6_suffix.replace(':', '')
 
         # 使用前缀:根据前缀64位到domain表中找对应的naIP(RPKI query模拟)
-        domainList = queryDomain(ipv6_prefix + ":")  # 返回的是AS的信息列表
-        if domainList is not None and len(domainList) > 0:
-            naIP = domainList[0].domainIP
-            search_result['as_name'] = domainList[0].domainName
+        domain_info = send2rpki(ipv6_prefix)  # 返回的是AS的信息列表
+        if domain_info is not None and 'domainIP' in domain_info.keys():
+            naIP = domain_info['domainIP']
+            search_result['as_name'] = domain_info['domainName']
+
+            if Config.DEBUG_MODE:
+                print("getServerIP:", naIP)
 
             # 使用后缀:在naIP对应域内解析出用户数据
-            search_success, resolve_result = resolveAIDInAS(naIP, ipv6_suffix)
+            resolve_result = send2resolve(naIP, ipv6_suffix)
             for each_key in resolve_result.keys():
                 search_result[each_key] = resolve_result[each_key]
         else:
-            search_success = False
+            search_result['success'] = False
             search_result['message'] = "前缀不属于任何AS"
 
-    return search_success, search_result
+    return search_result
 
 
 if __name__ == "__main__":

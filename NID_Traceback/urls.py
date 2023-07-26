@@ -16,9 +16,11 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 
-from iptrace.views import getSearchPost
+from iptrace.views import getSearchPost, querySuffix, queryPrefix
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('traceback/', getSearchPost)
+    path('traceback/', getSearchPost),
+    path('query_suffix', querySuffix),
+    path('query_prefix', queryPrefix)
 ]

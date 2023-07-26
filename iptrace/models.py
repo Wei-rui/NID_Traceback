@@ -33,9 +33,9 @@ class User(models.Model):
 '''
 
 
-# 看情况是将基础信息存入数据库还是作为config直接读取
-class basicInfo(models.Model):
-    domainIP = models.GenericIPAddressField(protocol="ipv6")
+class asDomain(models.Model):
+    domainPrefix = models.GenericIPAddressField()
+    domainIP = models.GenericIPAddressField()
     domainName = models.CharField(max_length=32)
 
 
