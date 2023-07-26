@@ -1,3 +1,3 @@
-domain 2001:da8:24d:: 127.0.0.1 AS2333
-group testGroup 0000 10
-user liusq23 2023310742 1
+domain 2001:da8:24d:: AS2333
+group 2001:da8:24d:0:8518:5552:0B20:D57F testGroup 0000 10
+user 2001:da8:24d:0:8518:5552:0B20:D57F liusq23 2023310742 1

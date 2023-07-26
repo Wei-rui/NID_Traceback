@@ -7,36 +7,37 @@ import hashlib
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "NID_Traceback.settings")
 django.setup()
 
-from iptrace.models import asDomain, asIDEA, asGroup, asUser
+from iptrace.models import Domain, IDEA, Group, User
 from iptrace.search_action import search
 import Config
 
 
 def loadUser(user_paras):
-    # userName,userDID,groupID
+    # naIP,userName,userDID,groupID
     hash_object = hashlib.sha256()
-    hash_object.update(user_paras[1].encode())
+    hash_object.update(user_paras[2].encode())
 
-    group = asGroup.objects.filter(id=int(user_paras[2]))[0]
+    group = Group.objects.filter(id=int(user_paras[3]))[0]
     userLen = 36 - (2 * int(group.dividePart, 2) + 2)
     userPart = bin(int(hash_object.hexdigest(), 16))[2:][0:userLen]
 
-    userTest = asUser.objects.filter(groupID=int(user_paras[2]), userPart=userPart)
+    userTest = User.objects.filter(groupID=int(user_paras[3]), userPart=userPart)
     if userTest is None or len(userTest) == 0:
-        asUser.objects.create(userName=user_paras[0], userDID=user_paras[1],
-                              groupID=int(user_paras[2]), userPart=userPart)
+        User.objects.create(naIP=user_paras[0], userName=user_paras[1], userDID=user_paras[2],
+                            groupID=int(user_paras[3]), userPart=userPart)
     else:
         raise ValueError("Hash Conflict!")
 
 
 def loadDomain(domain_paras):
-    # domainPrefix, domainIP,naName
-    asDomain.objects.create(domainPrefix=domain_paras[0], domainIP=domain_paras[1], domainName=domain_paras[2])
+    # domainIP, naName
+    Domain.objects.create(domainIP=domain_paras[0], domainName=domain_paras[1])
 
 
 def loadGroup(group_paras):
-    # groupName,dividePart,orgPart
-    asGroup.objects.create(groupName=group_paras[0], dividePart=group_paras[1], orgPart=group_paras[2])
+    # naIP,groupName,dividePart,orgPart
+    Group.objects.create(naIP=group_paras[0], groupName=group_paras[1],
+                         dividePart=group_paras[2], orgPart=group_paras[3])
 
 
 def loadModel(config_line):
@@ -49,12 +50,12 @@ def loadModel(config_line):
         loadGroup(config_paras[1:])
 
 
-def genAddr(user: asUser, idea: asIDEA, create_time: datetime.datetime):
+def genAddr(user: User, idea: IDEA, create_time: datetime.datetime):
     minute_info = (create_time.timestamp() - datetime.datetime(year=create_time.year, month=1, day=1, hour=0, minute=0,
                                                                second=0, microsecond=0).timestamp()) // 60
     time_info = bin(int(minute_info))[2:].zfill(24)
 
-    group = asGroup.objects.filter(id=user.groupID)[0]
+    group = Group.objects.filter(id=user.groupID)[0]
     nid = group.dividePart + group.orgPart + user.userPart
     idea_object = iptrace.search_crypt.IDEA_Crypto(int(idea.ideaKey, 16))
     aid_int = idea_object.encrypt_block(int(nid + time_info, 2))
@@ -63,7 +64,7 @@ def genAddr(user: asUser, idea: asIDEA, create_time: datetime.datetime):
     suffix = ""
     for i in range(4):
         suffix = suffix + ":" + aid_str[4 * i: 4 * (i + 1)]
-    prefix = ':'.join(Config.DOMAIN_PREFIX.split(':')[0:4])
+    prefix = ':'.join(user.naIP.split(':')[0:4])
     address = prefix + suffix
     return address
 
@@ -75,15 +76,16 @@ def createIDEAAddr(outfile):
     create_time = datetime.timedelta(hours=1, minutes=23, seconds=12)
 
     ip_list = []
-    for i in range(3):
-        idea_object = iptrace.search_crypt.IDEA_Crypto()
-        idea_info = asIDEA.objects.create(ideaKey=hex(idea_object.master_key)[2:],
-                                          startTime=start_time + i * delta_time,
-                                          endTime=start_time + (i + 1) * delta_time)
+    for domain in Domain.objects.all():
+        for i in range(3):
+            idea_object = iptrace.search_crypt.IDEA_Crypto()
+            idea_info = IDEA.objects.create(naIP=domain.domainIP, ideaKey=hex(idea_object.master_key)[2:],
+                                            startTime=start_time + i * delta_time,
+                                            endTime=start_time + (i + 1) * delta_time)
 
-        for user in asUser.objects.all():
-            ip_addr = genAddr(user, idea_info, start_time + i * delta_time + create_time)
-            ip_list.append(ip_addr)
+            for user in User.objects.all():
+                ip_addr = genAddr(user, idea_info, start_time + i * delta_time + create_time)
+                ip_list.append(ip_addr)
 
     with open(outfile, 'w') as file:
         file.writelines('\n'.join(ip_list))
