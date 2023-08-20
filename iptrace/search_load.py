@@ -14,6 +14,13 @@ import Config
 
 def loadUser(user_paras):
     # userName,userDID,groupID
+    user_name = user_paras[0][0]
+    for user_char in user_paras[0][1:]:
+        if user_char.isupper():
+            user_name = user_name + ' ' + user_char
+        else:
+            user_name = user_name + user_char
+
     hash_object = hashlib.sha256()
     hash_object.update(user_paras[1].encode())
 
@@ -23,7 +30,7 @@ def loadUser(user_paras):
 
     userTest = asUser.objects.filter(groupID=int(user_paras[2]), userPart=userPart)
     if userTest is None or len(userTest) == 0:
-        asUser.objects.create(userName=user_paras[0], userDID=user_paras[1],
+        asUser.objects.create(userName=user_name, userDID=user_paras[1],
                               groupID=int(user_paras[2]), userPart=userPart)
     else:
         raise ValueError("Hash Conflict!")
@@ -111,8 +118,9 @@ def testIPAddress(out_name: str):
 
 if __name__ == "__main__":
     mode = 'test'
+    config_file = 'config_1.txt'
 
     if mode == 'build':  # 将config.txt文件中的信息初始化到数据库,并生成样例IP地址文件
-        loadConfig('config.txt', 'ip_address.txt')
+        loadConfig(config_file, 'ip_address.txt')
     elif mode == 'test':  # 测试解析样例IP文件中的地址
         testIPAddress('ip_address.txt')
